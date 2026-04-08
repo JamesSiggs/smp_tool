@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Soil Management Plan Tool — Siggs & Co Ltd</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -331,11 +332,11 @@
     <div class="upload-grid">
       <div>
         <div class="upload-label">LandApp GeoJSON — Slopes export</div>
-        <div class="upload-hint">LandApp → Slopes layer → Export → GeoJSON</div>
+        <div class="upload-hint">LandApp → Slopes layer → Export → GeoJSON &nbsp;|&nbsp; Accepts .zip, .json or .geojson</div>
         <div class="drop-zone" id="zone-geojson">
-          <input type="file" id="file-geojson" accept=".json,.geojson" />
+          <input type="file" id="file-geojson" accept=".json,.geojson,.zip" />
           <div class="drop-icon">🗺</div>
-          <div class="drop-label">Drop GeoJSON here</div>
+          <div class="drop-label">Drop GeoJSON or ZIP here</div>
           <div class="drop-hint">or click to browse</div>
           <div class="drop-file" id="geojson-name"></div>
         </div>
@@ -367,7 +368,7 @@
       <img class="soil-image-preview" id="soil-img-preview" src="" alt="" />
       <div class="soil-image-text">
         <div class="drop-label">Drop soil map screenshot here</div>
-        <div class="drop-hint">PNG or JPG — must show field IDs and RB209 legend</div>
+        <div class="drop-hint">Click to browse, drag &amp; drop, or press <kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 5px;font-size:10px;">Ctrl+V</kbd> to paste a screenshot</div>
         <div class="drop-file" id="soil-img-name"></div>
       </div>
     </div>
@@ -507,27 +508,65 @@ function setupDrop(zoneId,inputId,nameId,type){
 }
 function handleFile(file,type,zone,nm){
   if(!file)return;
+  if(type==='geojson' && (file.name.endsWith('.zip') || file.type==='application/zip' || file.type==='application/x-zip-compressed')){
+    handleZip(file,zone,nm);
+    return;
+  }
   const reader=new FileReader();
   reader.onload=e=>{
     if(type==='geojson'){
-      try{
-        const parsed=JSON.parse(e.target.result);
-        const feats=parsed.features||[];
-        const parcelCount=feats.filter(f=>f.properties&&f.properties.parcelId).length;
-        const slopeCount=feats.filter(f=>f.properties&&f.properties.slope_category).length;
-        if(parcelCount===0&&slopeCount===0){
-          showStatus('This file does not appear to contain parcel or slope data. Please export the Slopes layer from LandApp.','error');
-          return;
-        }
-        geoData=parsed;
-        nm.textContent='✓ '+file.name+' ('+parcelCount+' parcels, '+slopeCount+' slope zones)';
-        zone.classList.add('loaded');
-        buildSoilInputs();checkReady();
-        if(soilImgB64&&apiKey) analyseImage();
-      }catch{showStatus('Invalid GeoJSON file — please check the file and try again.','error');}
-    }else{osmText=e.target.result;nm.textContent='✓ '+file.name;zone.classList.add('loaded');checkReady();}
+      loadGeoJSON(e.target.result, file.name, zone, nm);
+    }else{
+      osmText=e.target.result;
+      nm.textContent='✓ '+file.name;
+      zone.classList.add('loaded');
+      checkReady();
+    }
   };
   reader.readAsText(file);
+}
+
+function loadGeoJSON(text, filename, zone, nm){
+  try{
+    const parsed=JSON.parse(text);
+    const feats=parsed.features||[];
+    const parcelCount=feats.filter(f=>f.properties&&f.properties.parcelId).length;
+    const slopeCount=feats.filter(f=>f.properties&&f.properties.slope_category).length;
+    if(parcelCount===0&&slopeCount===0){
+      showStatus('This file does not appear to contain parcel or slope data. Please export the Slopes layer from LandApp.','error');
+      return;
+    }
+    geoData=parsed;
+    nm.textContent='✓ '+filename+' ('+parcelCount+' parcels, '+slopeCount+' slope zones)';
+    zone.classList.add('loaded');
+    buildSoilInputs();
+    checkReady();
+    if(soilImgB64&&apiKey) analyseImage();
+  }catch(e){
+    showStatus('Invalid GeoJSON — could not parse the file. Error: '+e.message,'error');
+  }
+}
+
+async function handleZip(file, zone, nm){
+  showStatus('Reading ZIP file...','info');
+  try{
+    const JSZip = window.JSZip;
+    if(!JSZip){ showStatus('ZIP support not loaded — please refresh and try again.','error'); return; }
+    const zip = await JSZip.loadAsync(file);
+    // Find the first .json or .geojson file inside
+    const jsonFile = Object.values(zip.files).find(f =>
+      !f.dir && (f.name.endsWith('.json') || f.name.endsWith('.geojson'))
+    );
+    if(!jsonFile){
+      showStatus('No GeoJSON file found inside the ZIP. Please check the export from LandApp.','error');
+      return;
+    }
+    const text = await jsonFile.async('string');
+    showStatus('','info');
+    loadGeoJSON(text, jsonFile.name, zone, nm);
+  }catch(e){
+    showStatus('Could not read ZIP file: '+e.message,'error');
+  }
 }
 setupDrop('zone-geojson','file-geojson','geojson-name','geojson');
 setupDrop('zone-osm','file-osm','osm-name','osm');
