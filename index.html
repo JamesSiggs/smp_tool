@@ -363,7 +363,7 @@
     </div>
 
     <div class="soil-image-drop" id="zone-soil-img">
-      <input type="file" id="file-soil-img" accept="image/*" />
+      <input type="file" id="file-soil-img" accept="image/*,.png,.jpg,.jpeg,.gif,.bmp,.webp,.tiff" />
       <img class="soil-image-preview" id="soil-img-preview" src="" alt="" />
       <div class="soil-image-text">
         <div class="drop-label">Drop soil map screenshot here</div>
@@ -478,6 +478,8 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── Constants ─────────────────────────────────────────────────────────────────
+// Used only to exclude non-field parcels (tracks, ponds) in Land Covers exports
+// Soil type is NEVER derived from the GeoJSON — only from the uploaded screenshot
 const ROAD_CODES  = new Set(['631','551']);
 const WATER_CODES = new Set(['582','243']);
 const SLOPE_DEG   = {'1':0,'2':2.5,'3':5.0,'4':9.0,'5':13.0};
@@ -521,6 +523,7 @@ function handleFile(file,type,zone,nm){
         nm.textContent='✓ '+file.name+' ('+parcelCount+' parcels, '+slopeCount+' slope zones)';
         zone.classList.add('loaded');
         buildSoilInputs();checkReady();
+        if(soilImgB64&&apiKey) analyseImage();
       }catch{showStatus('Invalid GeoJSON file — please check the file and try again.','error');}
     }else{osmText=e.target.result;nm.textContent='✓ '+file.name;zone.classList.add('loaded');checkReady();}
   };
@@ -602,7 +605,8 @@ Reply ONLY with a JSON object, e.g.: {"SS3504":"Shallow","SX3695":"Deep Clayey"}
 // ── Soil dropdowns ────────────────────────────────────────────────────────────
 function buildSoilInputs(){
   if(!geoData)return;
-  const sheets=[...new Set((geoData.features||[]).filter(f=>f.properties&&f.properties.parcelId&&!ROAD_CODES.has(f.properties.land_cover_class_code)&&!WATER_CODES.has(f.properties.land_cover_class_code)).map(f=>f.properties.sheetId))].sort();
+  // Sheet filter kept only for old-format exports — soil type comes from screenshot only
+  // (not used for soil assignment, only for building the sheet list for legacy display)
   const container=document.getElementById('soil-inputs');
   if(!sheets.length){container.innerHTML='<p style="font-size:12px;color:#aaa">No parcels found.</p>';return;}
   container.innerHTML='<div class="soil-grid">'+sheets.map((s,i)=>`<div class="soil-row"><span class="soil-dot" style="background:${DOT_COLORS[i%DOT_COLORS.length]}"></span><label>${s}</label><select id="soil-${s}" onchange="soilMap['${s}']=this.value">${SOIL_OPTIONS.map(o=>`<option value="${o}">${o}</option>`).join('')}</select></div>`).join('')+'</div>';
@@ -664,7 +668,7 @@ function runAnalysis(){
       const slope=getSlopeAt(cx,cy);
       const hasRoad=rings.some(r=>lineNearRing(roads,r,5));
       const hasWater=rings.some(r=>lineNearRing(waters,r,5));
-      results.push({fieldId:fid,sheetId:props.sheetId,parcelId:props.parcelId,desc:props.description||'',area:Math.round(area*10000)/10000,slope:Math.round(slope*100)/100,slopeBand:dominant(slope),road:hasRoad?'Yes':'No',water:hasWater?'Yes':'No',boundary:[hasRoad?'Road':'',hasWater?'Watercourse':''].filter(Boolean).join(', ')||'—',soil:soilMap[fid]||soilMap[props.sheetId]||'—'});
+      results.push({fieldId:fid,sheetId:props.sheetId,parcelId:props.parcelId,desc:props.description||props.lfa_code||'',area:Math.round(area*10000)/10000,slope:Math.round(slope*100)/100,slopeBand:dominant(slope),road:hasRoad?'Yes':'No',water:hasWater?'Yes':'No',boundary:[hasRoad?'Road':'',hasWater?'Watercourse':''].filter(Boolean).join(', ')||'—',soil:soilMap[fid]||'—'});
     }
     results.sort((a,b)=>a.fieldId.localeCompare(b.fieldId));
     lastResults=results;
