@@ -476,6 +476,40 @@ window.addEventListener('DOMContentLoaded', () => {
     clearKey(); apiKey=''; updateKeyDisplay();
     document.getElementById('api-key-input').value='';
   });
+
+  // Test key button
+  const btnTest = document.getElementById('btn-test-key');
+  if(btnTest) btnTest.addEventListener('click', async ()=>{
+    const testKey = document.getElementById('api-key-input').value.trim() || apiKey;
+    const resultEl = document.getElementById('test-key-result');
+    if(!testKey){ resultEl.style.display='block'; resultEl.style.background='#fdedec'; resultEl.style.color='#922b21'; resultEl.textContent='No key entered.'; return; }
+    btnTest.textContent='Testing...'; btnTest.disabled=true;
+    resultEl.style.display='none';
+    try{
+      const resp = await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','x-api-key':testKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+        body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:10,messages:[{role:'user',content:'Hi'}]})
+      });
+      const data = await resp.json();
+      if(resp.ok){
+        resultEl.style.background='#eafaf1'; resultEl.style.color='#1e8449';
+        resultEl.textContent='✓ API key works! Connection successful.';
+      } else {
+        resultEl.style.background='#fdedec'; resultEl.style.color='#922b21';
+        resultEl.textContent='✗ API error '+resp.status+': '+(data.error?.message||JSON.stringify(data));
+      }
+    }catch(e){
+      resultEl.style.background='#fdedec'; resultEl.style.color='#922b21';
+      if(e.message==='Failed to fetch'){
+        resultEl.textContent='✗ Network blocked — your browser or network is preventing the API call. Try a different browser, or disable browser extensions.';
+      } else {
+        resultEl.textContent='✗ '+e.message;
+      }
+    }
+    resultEl.style.display='block';
+    btnTest.textContent='Test API key connection'; btnTest.disabled=false;
+  });
 });
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -700,8 +734,16 @@ No preamble, no explanation — just the JSON.`;
     showAiStatus(msg, unknown===0?'done':'thinking');
     buildSoilInputs();
   }catch(e){
-    showAiStatus('Could not read soil map: '+e.message,'error');
-    console.error(e);
+    let errMsg = e.message || 'Unknown error';
+    // Detect CORS specifically
+    if(errMsg==='Failed to fetch'||errMsg.includes('NetworkError')||errMsg.includes('CORS')){
+      errMsg = 'Network error — your browser is blocking the API call. '
+             + 'This can happen on some networks or browsers. '
+             + 'Try opening the browser console (F12) for details. '
+             + 'Error: ' + e.message;
+    }
+    showAiStatus(errMsg, 'error');
+    console.error('analyseImage error:', e);
   }
 }
 
