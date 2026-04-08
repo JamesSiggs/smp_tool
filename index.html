@@ -356,24 +356,25 @@
 
   <!-- Step 3 -->
   <div class="card">
-    <h2><span class="step-num">3</span> RB209 Soil Types</h2>
-    <div class="soil-image-wrap">
-      <div class="upload-label" style="margin-bottom:4px;">Optional — upload LandApp soil map screenshot</div>
-      <div class="upload-hint">Claude will read the field colours and assign RB209 types automatically. Requires API key. You can override any result below.</div>
-      <div class="soil-image-drop" id="zone-soil-img">
-        <input type="file" id="file-soil-img" accept="image/*" />
-        <img class="soil-image-preview" id="soil-img-preview" src="" alt="" />
-        <div class="soil-image-text">
-          <div class="drop-label">Drop soil map image here</div>
-          <div class="drop-hint">PNG, JPG or screenshot — or skip and assign manually below</div>
-          <div class="drop-file" id="soil-img-name"></div>
-        </div>
-      </div>
-      <div class="ai-status" id="ai-status"></div>
+    <h2><span class="step-num">3</span> RB209 Soil Types — Upload Soil Map Screenshot</h2>
+
+    <div class="hint-block">
+      Take a screenshot of the RB209 Soil Type map in LandApp (showing field IDs and the colour legend) and upload it here. Claude will read each field ID and assign the correct soil type automatically. Any parcels not visible on the map can be set manually below.
     </div>
-    <div class="hint-block">Soil types are assigned per OS map sheet area found in the GeoJSON. Load your GeoJSON first to see the sheet areas below.</div>
-    <div id="soil-inputs">
-      <p style="font-size:12px;color:#aaa;font-style:italic;">Load a GeoJSON file first to see sheet areas.</p>
+
+    <div class="soil-image-drop" id="zone-soil-img">
+      <input type="file" id="file-soil-img" accept="image/*" />
+      <img class="soil-image-preview" id="soil-img-preview" src="" alt="" />
+      <div class="soil-image-text">
+        <div class="drop-label">Drop soil map screenshot here</div>
+        <div class="drop-hint">PNG or JPG — must show field IDs and RB209 legend</div>
+        <div class="drop-file" id="soil-img-name"></div>
+      </div>
+    </div>
+    <div class="ai-status" id="ai-status"></div>
+
+    <div id="soil-inputs" style="margin-top:16px;">
+      <p style="font-size:12px;color:#aaa;font-style:italic;">Load a GeoJSON file first to see parcels.</p>
     </div>
   </div>
 
@@ -663,7 +664,7 @@ function runAnalysis(){
       const slope=getSlopeAt(cx,cy);
       const hasRoad=rings.some(r=>lineNearRing(roads,r,5));
       const hasWater=rings.some(r=>lineNearRing(waters,r,5));
-      results.push({fieldId:fid,sheetId:props.sheetId,parcelId:props.parcelId,desc:props.description||'',area:Math.round(area*10000)/10000,slope:Math.round(slope*100)/100,slopeBand:dominant(slope),road:hasRoad?'Yes':'No',water:hasWater?'Yes':'No',boundary:[hasRoad?'Road':'',hasWater?'Watercourse':''].filter(Boolean).join(', ')||'—',soil:soilMap[props.sheetId]||'—'});
+      results.push({fieldId:fid,sheetId:props.sheetId,parcelId:props.parcelId,desc:props.description||'',area:Math.round(area*10000)/10000,slope:Math.round(slope*100)/100,slopeBand:dominant(slope),road:hasRoad?'Yes':'No',water:hasWater?'Yes':'No',boundary:[hasRoad?'Road':'',hasWater?'Watercourse':''].filter(Boolean).join(', ')||'—',soil:soilMap[fid]||soilMap[props.sheetId]||'—'});
     }
     results.sort((a,b)=>a.fieldId.localeCompare(b.fieldId));
     lastResults=results;
