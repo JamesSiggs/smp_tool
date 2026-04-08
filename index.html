@@ -793,7 +793,7 @@ function buildSoilInputs(){
     html+='<div class="soil-grid">';
     undetected.forEach((p,i)=>{
       const safeId=p.replace(' ','-');
-      html+='<div class="soil-row"><span class="soil-dot" style="background:'+DOT_COLORS[i%DOT_COLORS.length]+'"></span><label style="font-size:11px;">'+p+'</label><select id="soil-'+safeId+'" onchange="soilMap[''+p+'']=this.value">'+SOIL_OPTIONS.map(o=>'<option value="'+o+'">'+o+'</option>').join('')+'</select></div>';
+      html += `<div class="soil-row"><span class="soil-dot" style="background:${DOT_COLORS[i%DOT_COLORS.length]}"></span><label style="font-size:11px;">${p}</label><select id="soil-${safeId}" data-parcel="${p}" onchange="soilMap[this.dataset.parcel]=this.value">${SOIL_OPTIONS.map(o=>`<option value="${o}">${o}</option>`).join('')}</select></div>`;
     });
     html+='</div>';
   }
