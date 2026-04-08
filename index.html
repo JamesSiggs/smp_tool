@@ -360,7 +360,7 @@
     <h2><span class="step-num">3</span> RB209 Soil Types — Upload Soil Map Screenshot</h2>
 
     <div class="hint-block">
-      Take a screenshot of the RB209 Soil Type map in LandApp (showing field IDs and the colour legend) and upload it here. Claude will read each field ID and assign the correct soil type automatically. Any parcels not visible on the map can be set manually below.
+      <strong>Important:</strong> Zoom in enough in LandApp so the <strong>field ID numbers are clearly visible</strong> on each parcel before taking the screenshot. The legend must also be visible. If the farm is large, take 2–3 overlapping screenshots at closer zoom — upload each one in turn and Claude will build up the assignments. Any parcels not detected can be set manually below.
     </div>
 
     <div class="soil-image-drop" id="zone-soil-img">
@@ -623,62 +623,122 @@ function handleSoilImg(file){
 }
 
 // ── Claude vision ─────────────────────────────────────────────────────────────
+// ── Claude vision — per parcel ───────────────────────────────────────────────
 async function analyseImage(){
   if(!soilImgB64||!geoData)return;
-  if(!apiKey){showAiStatus('No API key — assign soil types manually below.','error');return;}
+  if(!apiKey){showAiStatus('No API key set — go to ⚙ Settings to add one, or assign soil types manually below.','error');return;}
   const features=geoData.features||[];
-  const sheets=[...new Set(features.filter(f=>{
-      if(!f.properties||!f.properties.parcelId) return false;
-      const code=f.properties.land_cover_class_code;
-      if(code&&(ROAD_CODES.has(code)||WATER_CODES.has(code))) return false;
-      return true;
-    }).map(f=>f.properties.sheetId))].sort();
-  showAiStatus('Reading soil map with AI — please wait...','thinking');
-  const prompt=`This is a LandApp RB209 soil type map for a UK farm. The legend shows colours for: Deep Clayey, Shallow, Medium, Light Sand, Organic, Peaty.
+  const parcels=[...new Set(features.filter(f=>{
+    if(!f.properties||!f.properties.parcelId) return false;
+    const code=f.properties.land_cover_class_code;
+    if(code&&(ROAD_CODES.has(code)||WATER_CODES.has(code))) return false;
+    return true;
+  }).map(f=>f.properties.sheetId+' '+f.properties.parcelId))].sort();
 
-The OS map sheet areas in this farm are: ${sheets.join(', ')}.
+  if(!parcels.length){showAiStatus('No parcels found — load GeoJSON first.','error');return;}
+  showAiStatus('Reading soil map — identifying each field ID...','thinking');
 
-For each sheet area, identify the RB209 soil type shown. If unclear, say "Unknown".
+  const prompt=`You are reading a LandApp RB209 Soil Type map screenshot for a UK farm.
 
-Reply ONLY with a JSON object, e.g.: {"SS3504":"Shallow","SX3695":"Deep Clayey"}`;
+IMPORTANT — read the legend box carefully first (top-left corner of the image). It shows coloured squares next to each soil type name. The colours vary by farm — do not assume which colour means which type. Read the legend, then match each field to its colour.
+
+Common LandApp colour schemes (but always verify against the legend):
+- Deep Clayey: teal / cyan / turquoise
+- Medium: bright pink / magenta / hot pink
+- Shallow: orange / gold / amber
+- Light Sand: purple / lavender
+- Organic: dark green
+- Peaty: dark brown
+
+Each field polygon on the map shows its Field ID label (e.g. SS9331 2859).
+
+Field IDs to classify:
+${parcels.join(', ')}
+
+Steps:
+1. Read the legend to identify what colour = what soil type
+2. For each Field ID, find it on the map and note its fill colour
+3. Match that colour to the legend
+
+Reply ONLY with a valid JSON object, e.g.:
+{"SS9331 2859":"Medium","SS9231 8966":"Deep Clayey","SS9332 2634":"Shallow"}
+
+No preamble, no explanation — just the JSON.`;
+
   try{
     const resp=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:500,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:soilImgB64.media_type,data:soilImgB64.data}},{type:'text',text:prompt}]}]})
+      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:2000,messages:[{role:'user',content:[
+        {type:'image',source:{type:'base64',media_type:soilImgB64.media_type,data:soilImgB64.data}},
+        {type:'text',text:prompt}
+      ]}]})
     });
-    if(!resp.ok)throw new Error('API returned '+resp.status+' — check your API key');
+    if(!resp.ok)throw new Error('API returned '+resp.status+' — check your API key in Settings');
     const data=await resp.json();
     const text=data.content?.find(c=>c.type==='text')?.text||'';
     const m=text.match(/\{[\s\S]*\}/);
     if(!m)throw new Error('Could not parse AI response');
     const detected=JSON.parse(m[0]);
-    let filled=0,unknown=0;
-    sheets.forEach(s=>{
-      const val=detected[s];
-      const el=document.getElementById('soil-'+s);
-      if(el&&val&&SOIL_OPTIONS.includes(val)){
-        el.value=val;el.classList.add('ai-filled');soilMap[s]=val;filled++;
-        const row=el.closest('.soil-row');
-        if(row&&!row.querySelector('.ai-badge')){const b=document.createElement('span');b.className='ai-badge';b.textContent='AI';row.appendChild(b);}
-      }else unknown++;
+
+    let filled=0, alreadyKnown=0, unknown=0;
+    parcels.forEach(p=>{
+      const val=detected[p];
+      if(val&&SOIL_OPTIONS.includes(val)){
+        soilMap[p]=val; filled++;
+      } else if(soilMap[p]&&soilMap[p]!=='—'){
+        alreadyKnown++;
+      } else {
+        unknown++;
+      }
     });
-    showAiStatus(`AI detected ${filled} soil type${filled!==1?'s':''}${unknown?` — ${unknown} area${unknown!==1?'s':''} not detected, please assign manually`:'.'}`,'done');
+
+    const msg='AI assigned '+filled+' parcel'+(filled!==1?'s':'')
+      +(alreadyKnown?' ('+alreadyKnown+' already assigned from earlier images)':'')
+      +(unknown?' — '+unknown+' not detected, upload another screenshot or assign manually':' — all parcels assigned!')
+      +'.';
+    showAiStatus(msg, unknown===0?'done':'thinking');
+    buildSoilInputs();
   }catch(e){
     showAiStatus('Could not read soil map: '+e.message,'error');
+    console.error(e);
   }
 }
 
-// ── Soil dropdowns ────────────────────────────────────────────────────────────
+// ── Soil dropdowns — per parcel ──────────────────────────────────────────────
 function buildSoilInputs(){
   if(!geoData)return;
-  // Sheet filter kept only for old-format exports — soil type comes from screenshot only
-  // (not used for soil assignment, only for building the sheet list for legacy display)
+  const features=geoData.features||[];
+  const parcels=[...new Set(features.filter(f=>{
+    if(!f.properties||!f.properties.parcelId) return false;
+    const code=f.properties.land_cover_class_code;
+    if(code&&(ROAD_CODES.has(code)||WATER_CODES.has(code))) return false;
+    return true;
+  }).map(f=>f.properties.sheetId+' '+f.properties.parcelId))].sort();
+
   const container=document.getElementById('soil-inputs');
-  if(!sheets.length){container.innerHTML='<p style="font-size:12px;color:#aaa">No parcels found.</p>';return;}
-  container.innerHTML='<div class="soil-grid">'+sheets.map((s,i)=>`<div class="soil-row"><span class="soil-dot" style="background:${DOT_COLORS[i%DOT_COLORS.length]}"></span><label>${s}</label><select id="soil-${s}" onchange="soilMap['${s}']=this.value">${SOIL_OPTIONS.map(o=>`<option value="${o}">${o}</option>`).join('')}</select></div>`).join('')+'</div>';
-  sheets.forEach(s=>{soilMap[s]='Deep Clayey';document.getElementById('soil-'+s).value='Deep Clayey';});
-  if(soilImgB64)analyseImage();
+  if(!parcels.length){container.innerHTML='<p style="font-size:12px;color:#aaa">No parcels found.</p>';return;}
+
+  const detected=parcels.filter(p=>soilMap[p]&&soilMap[p]!=='—');
+  const undetected=parcels.filter(p=>!soilMap[p]||soilMap[p]==='—');
+
+  let html='';
+  if(detected.length){
+    html+='<p style="font-size:12px;color:#1e8449;margin-bottom:8px;">✓ '+detected.length+' parcel'+(detected.length!==1?'s':'')+' assigned by AI</p>';
+  }
+  if(undetected.length){
+    html+='<p style="font-size:12px;color:#888;margin-bottom:10px;">'+undetected.length+' parcel'+(undetected.length!==1?'s':'')+' not detected — assign manually:</p>';
+    html+='<div class="soil-grid">';
+    undetected.forEach((p,i)=>{
+      const safeId=p.replace(' ','-');
+      html+='<div class="soil-row"><span class="soil-dot" style="background:'+DOT_COLORS[i%DOT_COLORS.length]+'"></span><label style="font-size:11px;">'+p+'</label><select id="soil-'+safeId+'" onchange="soilMap[''+p+'']=this.value">'+SOIL_OPTIONS.map(o=>'<option value="'+o+'">'+o+'</option>').join('')+'</select></div>';
+    });
+    html+='</div>';
+  }
+  if(!undetected.length&&detected.length){
+    html+='<p style="font-size:12px;color:#888;margin-top:4px;">All parcels assigned. You can re-upload an image to update, or run the analysis.</p>';
+  }
+  container.innerHTML=html;
 }
 
 // ── OSM parser ────────────────────────────────────────────────────────────────
