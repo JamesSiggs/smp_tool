@@ -448,10 +448,10 @@ window.addEventListener('DOMContentLoaded', () => {
   apiKey = loadKey();
   updateKeyDisplay();
 
-  // If no key stored, open settings automatically on first visit
   if(!apiKey) openSettings();
 
   document.getElementById('btn-open-settings').addEventListener('click', openSettings);
+
   document.getElementById('btn-skip-key').addEventListener('click', () => {
     document.getElementById('settings-overlay').classList.add('hidden');
   });
@@ -459,56 +459,76 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-save-key').addEventListener('click', () => {
     const val = document.getElementById('api-key-input').value.trim();
     if(!val.startsWith('sk-ant-') && !val.startsWith('sk-')) {
-      document.getElementById('api-error').style.display='block'; return;
+      document.getElementById('api-error').style.display = 'block';
+      return;
     }
-    document.getElementById('api-error').style.display='none';
-    saveKey(val); apiKey=val; updateKeyDisplay();
+    document.getElementById('api-error').style.display = 'none';
+    saveKey(val);
+    apiKey = val;
+    updateKeyDisplay();
     document.getElementById('settings-overlay').classList.add('hidden');
   });
 
-  document.getElementById('api-key-input').addEventListener('keydown', e=>{
-    if(e.key==='Enter') document.getElementById('btn-save-key').click();
+  document.getElementById('api-key-input').addEventListener('keydown', e => {
+    if(e.key === 'Enter') document.getElementById('btn-save-key').click();
   });
 
-  // Clear key button
   const btnClear = document.getElementById('btn-clear-key');
-  if(btnClear) btnClear.addEventListener('click', ()=>{
-    clearKey(); apiKey=''; updateKeyDisplay();
-    document.getElementById('api-key-input').value='';
+  if(btnClear) btnClear.addEventListener('click', () => {
+    clearKey();
+    apiKey = '';
+    updateKeyDisplay();
+    document.getElementById('api-key-input').value = '';
   });
 
-  // Test key button
   const btnTest = document.getElementById('btn-test-key');
-  if(btnTest) btnTest.addEventListener('click', async ()=>{
+  if(btnTest) btnTest.addEventListener('click', async () => {
     const testKey = document.getElementById('api-key-input').value.trim() || apiKey;
     const resultEl = document.getElementById('test-key-result');
-    if(!testKey){ resultEl.style.display='block'; resultEl.style.background='#fdedec'; resultEl.style.color='#922b21'; resultEl.textContent='No key entered.'; return; }
-    btnTest.textContent='Testing...'; btnTest.disabled=true;
-    resultEl.style.display='none';
-    try{
-      const resp = await fetch('https://api.anthropic.com/v1/messages',{
-        method:'POST',
-        headers:{'Content-Type':'application/json','x-api-key':testKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-        body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:10,messages:[{role:'user',content:'Hi'}]})
+    if(!testKey) {
+      resultEl.style.cssText = 'display:block;background:#fdedec;color:#922b21;padding:8px;border-radius:6px;font-size:12px;margin-top:8px;';
+      resultEl.textContent = 'No key entered.';
+      return;
+    }
+    btnTest.textContent = 'Testing...';
+    btnTest.disabled = true;
+    resultEl.style.display = 'none';
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': testKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 10,
+          messages: [{ role: 'user', content: 'Hi' }]
+        })
       });
       const data = await resp.json();
-      if(resp.ok){
-        resultEl.style.background='#eafaf1'; resultEl.style.color='#1e8449';
-        resultEl.textContent='✓ API key works! Connection successful.';
+      resultEl.style.cssText = 'display:block;padding:8px;border-radius:6px;font-size:12px;margin-top:8px;';
+      if(resp.ok) {
+        resultEl.style.background = '#eafaf1';
+        resultEl.style.color = '#1e8449';
+        resultEl.textContent = '✓ API key works! Connection successful.';
       } else {
-        resultEl.style.background='#fdedec'; resultEl.style.color='#922b21';
-        resultEl.textContent='✗ API error '+resp.status+': '+(data.error?.message||JSON.stringify(data));
+        resultEl.style.background = '#fdedec';
+        resultEl.style.color = '#922b21';
+        resultEl.textContent = '✗ API error ' + resp.status + ': ' + (data.error?.message || JSON.stringify(data));
       }
-    }catch(e){
-      resultEl.style.background='#fdedec'; resultEl.style.color='#922b21';
-      if(e.message==='Failed to fetch'){
-        resultEl.textContent='✗ Network blocked — your browser or network is preventing the API call. Try a different browser, or disable browser extensions.';
+    } catch(e) {
+      resultEl.style.cssText = 'display:block;background:#fdedec;color:#922b21;padding:8px;border-radius:6px;font-size:12px;margin-top:8px;';
+      if(e.message === 'Failed to fetch') {
+        resultEl.textContent = '✗ Network blocked — browser is preventing the API call. Try a different browser or disable extensions (uBlock, Privacy Badger etc).';
       } else {
-        resultEl.textContent='✗ '+e.message;
+        resultEl.textContent = '✗ ' + e.message;
       }
     }
-    resultEl.style.display='block';
-    btnTest.textContent='Test API key connection'; btnTest.disabled=false;
+    btnTest.textContent = 'Test API key connection';
+    btnTest.disabled = false;
   });
 });
 
