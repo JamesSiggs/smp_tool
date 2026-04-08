@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Soil Management Plan Tool — Siggs & Co Ltd</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -490,7 +490,7 @@ const SOIL_EXCEL   = {'Deep Clayey':'C9EAE4','Shallow':'F9D49A','Medium':'F8B4D0
 const SLOPE_EXCEL  = {'Low (2-3°)':'E2EFDA','Moderate (3-7°)':'DDEBF7','High (7-11°)':'FCE4D6','Very High (>11°)':'F4CCCC'};
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let geoData=null, osmText=null, soilImgB64=null, soilMap={}, lastResults=[];
+let geoData=null, osmText=null, soilImgB64=null, soilMap={}, lastResults=[], isBNGCoords=false;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function dominant(s){const m=[2.5,5,9,13],n=['Low (2-3°)','Moderate (3-7°)','High (7-11°)','Very High (>11°)'];return n[m.reduce((bi,v,i)=>Math.abs(v-s)<Math.abs(m[bi]-s)?i:bi,0)];}
@@ -508,7 +508,12 @@ function setupDrop(zoneId,inputId,nameId,type){
 }
 function handleFile(file,type,zone,nm){
   if(!file)return;
-  if(type==='geojson' && (file.name.endsWith('.zip') || file.type==='application/zip' || file.type==='application/x-zip-compressed')){
+  if(type==='geojson' && (
+    file.name.toLowerCase().endsWith('.zip') ||
+    file.type==='application/zip' ||
+    file.type==='application/x-zip-compressed' ||
+    file.type==='application/octet-stream' && file.name.toLowerCase().endsWith('.zip')
+  )){
     handleZip(file,zone,nm);
     return;
   }
@@ -537,7 +542,19 @@ function loadGeoJSON(text, filename, zone, nm){
       return;
     }
     geoData=parsed;
-    nm.textContent='✓ '+filename+' ('+parcelCount+' parcels, '+slopeCount+' slope zones)';
+
+    // Detect coordinate system from CRS tag or first coordinate value
+    // BNG (EPSG:27700): x ~100000–700000, y ~0–1300000
+    // WGS84 (EPSG:4326): x ~-8 to 2, y ~49 to 61
+    const crsName = parsed.crs?.properties?.name || '';
+    const isBNG = crsName.includes('27700') || crsName.includes('OSGB');
+    // Also check first coordinate as fallback
+    const firstGeom = feats.find(f=>f.geometry)?.geometry?.coordinates;
+    const firstCoord = firstGeom ? (firstGeom[0][0] || firstGeom[0]) : null;
+    const firstX = Array.isArray(firstCoord?.[0]) ? firstCoord[0][0] : firstCoord?.[0];
+    isBNGCoords = isBNG || (firstX && Math.abs(firstX) > 1000);
+
+    nm.textContent='✓ '+filename+' ('+parcelCount+' parcels, '+slopeCount+' slope zones'+(isBNGCoords?' · BNG':' · WGS84')+')';
     zone.classList.add('loaded');
     buildSoilInputs();
     checkReady();
@@ -550,22 +567,33 @@ function loadGeoJSON(text, filename, zone, nm){
 async function handleZip(file, zone, nm){
   showStatus('Reading ZIP file...','info');
   try{
-    const JSZip = window.JSZip;
-    if(!JSZip){ showStatus('ZIP support not loaded — please refresh and try again.','error'); return; }
-    const zip = await JSZip.loadAsync(file);
+    // Wait up to 5s for JSZip to load from CDN
+    let attempts = 0;
+    while(!window.JSZip && attempts < 50){
+      await new Promise(r => setTimeout(r, 100));
+      attempts++;
+    }
+    if(!window.JSZip){
+      // JSZip not available — try reading as plain text (some zips are actually json renamed)
+      showStatus('ZIP library not available. Try unzipping the file and uploading the .json directly.','error');
+      return;
+    }
+    const zip = await window.JSZip.loadAsync(file);
     // Find the first .json or .geojson file inside
     const jsonFile = Object.values(zip.files).find(f =>
       !f.dir && (f.name.endsWith('.json') || f.name.endsWith('.geojson'))
     );
     if(!jsonFile){
-      showStatus('No GeoJSON file found inside the ZIP. Please check the export from LandApp.','error');
+      showStatus('No GeoJSON file found inside the ZIP. Files found: ' +
+        Object.keys(zip.files).join(', '),'error');
       return;
     }
+    showStatus('Extracting ' + jsonFile.name + '...','info');
     const text = await jsonFile.async('string');
-    showStatus('','info');
     loadGeoJSON(text, jsonFile.name, zone, nm);
   }catch(e){
-    showStatus('Could not read ZIP file: '+e.message,'error');
+    showStatus('Could not read ZIP file: '+e.message+'. Try unzipping and uploading the .json directly.','error');
+    console.error(e);
   }
 }
 setupDrop('zone-geojson','file-geojson','geojson-name','geojson');
@@ -672,9 +700,29 @@ function parseOSM(xml){
 }
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
-function toM(lon,lat){const R=6378137,f=Math.PI/180;return[lon*f*R*Math.cos(51*f),lat*f*R];}
+function toM(x,y){
+  // If BNG (coords already in metres), return as-is
+  if(isBNGCoords) return [x,y];
+  // Otherwise convert WGS84 degrees to approximate metres
+  const R=6378137,f=Math.PI/180;
+  return[x*f*R*Math.cos(51*f),y*f*R];
+}
 function ptSeg2(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;if(!l2)return(px-ax)**2+(py-ay)**2;const t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/l2));return(px-ax-t*dx)**2+(py-ay-t*dy)**2;}
-function lineNearRing(lines,ring,buf){const b2=buf*buf,rm=ring.map(([o,a])=>toM(o,a));for(const l of lines){const lm=l.map(([o,a])=>toM(o,a));for(let i=0;i<lm.length-1;i++){const[ax,ay]=lm[i],[bx,by]=lm[i+1];for(const[px,py]of rm)if(ptSeg2(px,py,ax,ay,bx,by)<b2)return true;}}return false;}
+function wgs84ToM(lon,lat){const R=6378137,f=Math.PI/180;return[lon*f*R*Math.cos(51*f),lat*f*R];}
+function lineNearRing(lines,ring,buf){
+  const b2=buf*buf;
+  // Parcel ring: convert using toM (handles both BNG and WGS84)
+  const rm=ring.map(([x,y])=>toM(x,y));
+  for(const l of lines){
+    // OSM lines are always WGS84
+    const lm=l.map(([o,a])=>wgs84ToM(o,a));
+    for(let i=0;i<lm.length-1;i++){
+      const[ax,ay]=lm[i],[bx,by]=lm[i+1];
+      for(const[px,py]of rm)if(ptSeg2(px,py,ax,ay,bx,by)<b2)return true;
+    }
+  }
+  return false;
+}
 function polyArea(ring){const pts=ring.map(([o,a])=>toM(o,a));let a=0;for(let i=0;i<pts.length-1;i++)a+=pts[i][0]*pts[i+1][1]-pts[i+1][0]*pts[i][1];return Math.abs(a/2)/10000;}
 function ptInPoly(px,py,ring){let inside=false;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const[xi,yi]=ring[i],[xj,yj]=ring[j];if((yi>py)!==(yj>py)&&px<(xj-xi)*(py-yi)/(yj-yi)+xi)inside=!inside;}return inside;}
 function centroid(ring){const n=ring.length-1;return[ring.slice(0,n).reduce((s,p)=>s+p[0],0)/n,ring.slice(0,n).reduce((s,p)=>s+p[1],0)/n];}
